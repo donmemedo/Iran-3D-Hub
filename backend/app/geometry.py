@@ -3,15 +3,24 @@
 Pure-python parsers (no numpy/native deps) for binary STL, ASCII STL and OBJ.
 Volume comes from the signed-tetrahedron sum over every triangle, which is the
 same method slicers use, so the instant quote is grounded in the real part.
+
+Every parser is bounded: at most MAX_TRIANGLES triangles are read, so parse time and
+memory have a hard ceiling no matter what an attacker uploads.
 """
 from __future__ import annotations
 
+import io
+import math
 import re
 import struct
 from dataclasses import dataclass, field
-from typing import List, Tuple
+from typing import Iterable, List, Tuple
 
 Vec = Tuple[float, float, float]
+Tri = Tuple[Vec, Vec, Vec]
+
+# ~0.6 s of pure-python work in the worst case; real printable parts are far below this.
+MAX_TRIANGLES = 500_000
 
 
 @dataclass
@@ -39,9 +48,9 @@ def _tri_area(a: Vec, b: Vec, c: Vec) -> float:
     return 0.5 * (cx * cx + cy * cy + cz * cz) ** 0.5
 
 
-def _stats_from_triangles(tris: List[Tuple[Vec, Vec, Vec]]) -> MeshStats:
+def _stats_from_triangles(tris: List[Tri], truncated: bool = False) -> MeshStats:
     if not tris:
-        return MeshStats(exact=False, warnings=["empty_mesh"])
+        return MeshStats(exact=False, warnings=["empty_mesh"] + (["mesh_truncated"] if truncated else []))
     vol = 0.0
     area = 0.0
     lo = [float("inf")] * 3
@@ -53,6 +62,8 @@ def _stats_from_triangles(tris: List[Tuple[Vec, Vec, Vec]]) -> MeshStats:
             for i in range(3):
                 lo[i] = min(lo[i], p[i])
                 hi[i] = max(hi[i], p[i])
+    if not all(math.isfinite(x) for x in (vol, area, *lo, *hi)):
+        return MeshStats(exact=False, warnings=["empty_mesh"])  # NaN/inf coordinates
     bbox = tuple(round(hi[i] - lo[i], 2) for i in range(3))  # mm
     stats = MeshStats(
         volume_cm3=round(abs(vol) / 1000.0, 3),  # mm3 -> cm3
@@ -63,51 +74,71 @@ def _stats_from_triangles(tris: List[Tuple[Vec, Vec, Vec]]) -> MeshStats:
     if stats.volume_cm3 <= 0:
         stats.warnings.append("non_manifold")
         stats.exact = False
+    if truncated:  # volume of a partial mesh is not the part's volume
+        stats.warnings += ["mesh_truncated", "needs_engineer_review"]
+        stats.exact = False
     return stats
 
 
-def _parse_binary_stl(data: bytes) -> List[Tuple[Vec, Vec, Vec]]:
-    count = struct.unpack("<I", data[80:84])[0]
-    tris: List[Tuple[Vec, Vec, Vec]] = []
-    offset = 84
-    for _ in range(min(count, 2_000_000)):
-        if offset + 50 > len(data):
+def _parse_binary_stl(data: bytes) -> Tuple[List[Tri], bool]:
+    if len(data) < 84:
+        return [], False
+    declared = struct.unpack_from("<I", data, 80)[0]
+    available = (len(data) - 84) // 50          # never trust the header count
+    n = min(declared, available, MAX_TRIANGLES)
+    body = memoryview(data)[84:84 + 50 * n]
+    tris = [(v[3:6], v[6:9], v[9:12]) for v in struct.iter_unpack("<12fH", body)]
+    return tris, min(declared, available) > MAX_TRIANGLES  # type: ignore[return-value]
+
+
+_VERTEX = re.compile(r"vertex\s+(\S+)\s+(\S+)\s+(\S+)")
+
+
+def _parse_ascii_stl(text: str) -> Tuple[List[Tri], bool]:
+    verts: List[Vec] = []
+    cap = MAX_TRIANGLES * 3
+    truncated = False
+    for m in _VERTEX.finditer(text):
+        if len(verts) >= cap:
+            truncated = True
             break
-        vals = struct.unpack_from("<12fH", data, offset)
-        tris.append((vals[3:6], vals[6:9], vals[9:12]))  # type: ignore[arg-type]
-        offset += 50
-    return tris
+        try:
+            verts.append((float(m.group(1)), float(m.group(2)), float(m.group(3))))
+        except ValueError:
+            continue
+    tris = [tuple(verts[i:i + 3]) for i in range(0, len(verts) - 2, 3)]
+    return tris, truncated  # type: ignore[return-value]
 
 
-_NUM = re.compile(r"[-+]?[0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?")
-
-
-def _parse_ascii_stl(text: str) -> List[Tuple[Vec, Vec, Vec]]:
+def _parse_obj(text: str) -> Tuple[List[Tri], bool]:
     verts: List[Vec] = []
-    for line in text.splitlines():
-        s = line.strip()
-        if s.startswith("vertex"):
-            n = _NUM.findall(s)
-            if len(n) >= 3:
-                verts.append((float(n[0]), float(n[1]), float(n[2])))
-    return [tuple(verts[i : i + 3]) for i in range(0, len(verts) - 2, 3)]  # type: ignore
-
-
-def _parse_obj(text: str) -> List[Tuple[Vec, Vec, Vec]]:
-    verts: List[Vec] = []
-    tris: List[Tuple[Vec, Vec, Vec]] = []
-    for line in text.splitlines():
+    tris: List[Tri] = []
+    truncated = False
+    for line in io.StringIO(text):               # lazy: no list of millions of lines
         if line.startswith("v "):
+            if len(verts) >= MAX_TRIANGLES * 3:
+                return [], True                   # absurd vertex count: refuse, flag for review
             p = line.split()
-            verts.append((float(p[1]), float(p[2]), float(p[3])))
+            try:
+                verts.append((float(p[1]), float(p[2]), float(p[3])))
+            except (ValueError, IndexError):
+                continue
         elif line.startswith("f "):
             idx = []
-            for tok in line.split()[1:]:
-                i = int(tok.split("/")[0])
-                idx.append(i - 1 if i > 0 else len(verts) + i)
-            for k in range(1, len(idx) - 1):  # fan-triangulate
+            try:
+                for tok in line.split()[1:]:
+                    i = int(tok.split("/")[0])
+                    j = i - 1 if i > 0 else len(verts) + i
+                    if not 0 <= j < len(verts):   # negative wrap-around / out of range
+                        raise IndexError
+                    idx.append(j)
+            except (ValueError, IndexError):
+                continue                          # skip the malformed face, keep the rest
+            for k in range(1, len(idx) - 1):      # fan-triangulate
+                if len(tris) >= MAX_TRIANGLES:
+                    return tris, True
                 tris.append((verts[idx[0]], verts[idx[k]], verts[idx[k + 1]]))
-    return tris
+    return tris, truncated
 
 
 def analyse(filename: str, data: bytes) -> MeshStats:
@@ -116,11 +147,11 @@ def analyse(filename: str, data: bytes) -> MeshStats:
         if name.endswith(".stl"):
             head = data[:256].lstrip()
             if head[:5].lower() == b"solid" and b"facet" in data[:2048].lower():
-                return _stats_from_triangles(_parse_ascii_stl(data.decode("utf-8", "ignore")))
-            return _stats_from_triangles(_parse_binary_stl(data))
+                return _stats_from_triangles(*_parse_ascii_stl(data.decode("utf-8", "ignore")))
+            return _stats_from_triangles(*_parse_binary_stl(data))
         if name.endswith(".obj"):
-            return _stats_from_triangles(_parse_obj(data.decode("utf-8", "ignore")))
-    except Exception:
+            return _stats_from_triangles(*_parse_obj(data.decode("utf-8", "ignore")))
+    except (ValueError, IndexError, struct.error, UnicodeError):
         pass
 
     # STEP / IGES / 3MF and anything unreadable: fall back to a size estimate so

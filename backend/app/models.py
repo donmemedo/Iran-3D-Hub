@@ -1,7 +1,12 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlmodel import Field, SQLModel
+
+
+def utcnow() -> datetime:
+    """Timezone-aware UTC (datetime.utcnow() is deprecated; SQLModel >= 0.0.4x rejects naive values)."""
+    return datetime.now(timezone.utc)
 
 
 class User(SQLModel, table=True):
@@ -12,7 +17,7 @@ class User(SQLModel, table=True):
     company: Optional[str] = None
     role: str = "maker"  # maker | hub | admin
     password_hash: str = ""
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow)
 
 
 class Hub(SQLModel, table=True):
@@ -56,7 +61,7 @@ class Material(SQLModel, table=True):
 
 class Quote(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
-    public_id: str = Field(index=True)
+    public_id: str = Field(index=True, unique=True)
     user_id: Optional[int] = Field(default=None, foreign_key="user.id")
     filename: str = ""
     volume_cm3: float = 0
@@ -75,13 +80,13 @@ class Quote(SQLModel, table=True):
     lead_time_days: int = 3
     print_hours: float = 0
     warnings: str = ""
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow)
 
 
 class Order(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
-    public_id: str = Field(index=True)
-    user_id: int = Field(foreign_key="user.id")
+    public_id: str = Field(index=True, unique=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
     quote_id: int = Field(foreign_key="quote.id")
     hub_id: Optional[int] = Field(default=None, foreign_key="hub.id")
     status: str = "pending_payment"
@@ -89,15 +94,16 @@ class Order(SQLModel, table=True):
     note: str = ""
     amount: int = 0
     commission: int = 0
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
 
 
 class Review(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     hub_id: int = Field(foreign_key="hub.id")
     user_id: Optional[int] = Field(default=None, foreign_key="user.id")
+    order_id: Optional[int] = Field(default=None, foreign_key="order.id", unique=True)  # one review per order
     author: str = ""
     rating: int = 5
     body: str = ""
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow)

@@ -1,5 +1,6 @@
 from sqlmodel import Session, select
 
+from .config import settings
 from .db import engine
 from .models import Hub, Material, Review, User
 from .security import hash_password
@@ -92,7 +93,9 @@ def seed() -> None:
             s.commit()
             for (hub_id, author, rating, body) in REVIEWS:
                 s.add(Review(hub_id=hub_id, author=author, rating=rating, body=body))
-        if not s.exec(select(User).where(User.email == "demo@3dhub.ir")).first():
+        # A published credential must never exist in production: opt-in only.
+        if (settings.dev or settings.seed_demo) and \
+                not s.exec(select(User).where(User.email == "demo@3dhub.ir")).first():
             s.add(User(email="demo@3dhub.ir", full_name="کاربر نمونه", company="دارواگ",
                        phone="09120000000", password_hash=hash_password("demo1234")))
         s.commit()

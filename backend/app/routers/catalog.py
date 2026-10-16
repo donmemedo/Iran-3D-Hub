@@ -1,15 +1,19 @@
-from fastapi import APIRouter, Depends
+import time
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session, select
 
 from ..db import get_session
 from ..models import Hub, Material, Review
 from ..pricing import CITY_LEAD, QUALITY, TECH
 
+from .quotes import split_csv
+
 router = APIRouter(prefix="/api", tags=["catalog"])
 
 
 @router.get("/materials")
-def materials(technology: str | None = None, session: Session = Depends(get_session)):
+def materials(technology: str | None = Query(None, max_length=8), session: Session = Depends(get_session)):
     q = select(Material)
     if technology:
         q = q.where(Material.technology == technology)
@@ -50,16 +54,17 @@ def cities():
 
 
 @router.get("/hubs")
-def hubs(city: str | None = None, technology: str | None = None,
-         material: str | None = None, q: str | None = None,
-         sort: str = "rating", session: Session = Depends(get_session)):
+def hubs(city: str | None = Query(None, max_length=40), technology: str | None = Query(None, max_length=8),
+         material: str | None = Query(None, max_length=32), q: str | None = Query(None, max_length=80),
+         sort: str = Query("rating", max_length=12), limit: int = Query(100, ge=1, le=200),
+         session: Session = Depends(get_session)):
     rows = session.exec(select(Hub)).all()
     if city:
         rows = [h for h in rows if h.city_en.lower() == city.lower()]
-    if technology:
-        rows = [h for h in rows if technology.upper() in h.technologies.upper()]
+    if technology:  # whole-token match: "FD" must not match "FDM"
+        rows = [h for h in rows if technology.lower() in split_csv(h.technologies)]
     if material:
-        rows = [h for h in rows if material in h.materials]
+        rows = [h for h in rows if material.lower() in split_csv(h.materials)]
     if q:
         needle = q.strip().lower()
         rows = [h for h in rows
@@ -67,28 +72,38 @@ def hubs(city: str | None = None, technology: str | None = None,
                 or needle in h.city_fa or needle in h.city_en.lower()]
     keys = {"rating": lambda h: -h.rating, "speed": lambda h: h.lead_time_days,
             "orders": lambda h: -h.orders_done, "price": lambda h: h.hourly_rate}
-    return sorted(rows, key=keys.get(sort, keys["rating"]))
+    return sorted(rows, key=keys.get(sort, keys["rating"]))[:limit]
 
 
 @router.get("/hubs/{hub_id}")
 def hub_detail(hub_id: int, session: Session = Depends(get_session)):
     hub = session.get(Hub, hub_id)
     if not hub:
-        return {"error": "not_found"}
-    reviews = session.exec(select(Review).where(Review.hub_id == hub_id)).all()
-    return {"hub": hub, "reviews": reviews}
+        raise HTTPException(404, "hub_not_found")
+    reviews = session.exec(select(Review).where(Review.hub_id == hub_id)
+                           .order_by(Review.id.desc()).limit(50)).all()
+    return {"hub": hub, "reviews": [r.model_dump(exclude={"user_id", "order_id"}) for r in reviews]}
+
+
+_stats_cache: tuple[float, dict] | None = None  # (expires_at, payload); one worker, 30 s TTL
 
 
 @router.get("/stats")
 def stats(session: Session = Depends(get_session)):
+    global _stats_cache
+    now = time.monotonic()
+    if _stats_cache and _stats_cache[0] > now:
+        return _stats_cache[1]
     hubs_all = session.exec(select(Hub)).all()
-    return {
+    n = max(len(hubs_all), 1)
+    payload = {
         "hubs": len(hubs_all),
         "cities": len({h.city_en for h in hubs_all}),
         "orders_done": sum(h.orders_done for h in hubs_all),
-        "avg_rating": round(sum(h.rating for h in hubs_all) / max(len(hubs_all), 1), 2),
-        "avg_lead_days": round(sum(h.lead_time_days for h in hubs_all) / max(len(hubs_all), 1), 1),
+        "avg_rating": round(sum(h.rating for h in hubs_all) / n, 2),
+        "avg_lead_days": round(sum(h.lead_time_days for h in hubs_all) / n, 1),
         "materials": len(session.exec(select(Material)).all()),
-        "free_capacity_pct": round(
-            sum(100 - h.capacity_pct for h in hubs_all) / max(len(hubs_all), 1)),
+        "free_capacity_pct": round(sum(100 - h.capacity_pct for h in hubs_all) / n),
     }
+    _stats_cache = (now + 30, payload)
+    return payload
