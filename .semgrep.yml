@@ -1,0 +1,103 @@
+# Repo-specific guardrails. Run: semgrep scan --config .semgrep.yml --error .
+# CI (security.yml) also runs the p/owasp-top-ten registry pack.
+rules:
+  - id: h3d-no-datetime-utcnow
+    languages: [python]
+    severity: ERROR
+    message: >
+      datetime.utcnow() returns a naive datetime and is deprecated; SQLModel rejects naive
+      values. Use app.models.utcnow() (timezone-aware UTC) instead.
+    pattern-either:
+      - pattern: datetime.utcnow()
+      - pattern: datetime.datetime.utcnow()
+    metadata:
+      category: correctness
+
+  - id: h3d-no-md5-sha1
+    languages: [python]
+    severity: ERROR
+    message: >
+      MD5 and SHA-1 are broken for passwords, tokens and signatures. Passwords use scrypt
+      (app/security.py); signatures use HMAC-SHA256. For a non-security checksum pass
+      usedforsecurity=False.
+    patterns:
+      - pattern-either:
+          - pattern: hashlib.md5(...)
+          - pattern: hashlib.sha1(...)
+      - pattern-not: hashlib.$F(..., usedforsecurity=False)
+    metadata:
+      cwe: "CWE-327: Use of a Broken or Risky Cryptographic Algorithm"
+      owasp: "A02:2021 - Cryptographic Failures"
+
+  - id: h3d-jwt-decode-needs-algorithms
+    languages: [python]
+    severity: ERROR
+    message: >
+      jwt.decode() must pass an explicit algorithms=[...] allow-list and verify the signature.
+      Without it a token can pick its own algorithm (alg confusion / alg=none).
+    pattern-either:
+      - patterns:
+          - pattern: jwt.decode(...)
+          - pattern-not: jwt.decode(..., algorithms=$A, ...)
+      - pattern: |
+          jwt.decode(..., options={..., "verify_signature": False, ...}, ...)
+    metadata:
+      cwe: "CWE-347: Improper Verification of Cryptographic Signature"
+      owasp: "A02:2021 - Cryptographic Failures"
+
+  - id: h3d-cors-credentials-with-wildcard
+    languages: [python]
+    severity: ERROR
+    message: >
+      allow_credentials=True together with allow_origins=["*"] lets any website make
+      credentialed requests. The API uses a Bearer header, not cookies: keep
+      allow_credentials=False and list exact origins.
+    pattern-either:
+      - pattern: $APP.add_middleware(CORSMiddleware, ..., allow_origins=["*"], ..., allow_credentials=True, ...)
+      - pattern: CORSMiddleware(..., allow_origins=["*"], ..., allow_credentials=True, ...)
+    metadata:
+      cwe: "CWE-942: Permissive Cross-domain Policy with Untrusted Domains"
+      owasp: "A05:2021 - Security Misconfiguration"
+
+  - id: h3d-no-dangerously-set-inner-html
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: >
+      dangerouslySetInnerHTML with a non-literal value is an XSS sink. Render text as JSX.
+      A constant string (or a const bound to one) is allowed, e.g. the theme-init script.
+    patterns:
+      - pattern: |
+          <$EL ... dangerouslySetInnerHTML={{__html: $X}} ... />
+      - pattern-not: |
+          <$EL ... dangerouslySetInnerHTML={{__html: "..."}} ... />
+    metadata:
+      cwe: "CWE-79: Cross-site Scripting"
+      owasp: "A03:2021 - Injection"
+
+  - id: h3d-no-token-in-web-storage
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: >
+      Auth tokens are read and written only in frontend/src/lib/api.ts (token()/setToken()).
+      Do not store tokens in web storage anywhere else: one place to audit, one place to
+      move to an httpOnly cookie later.
+    paths:
+      include:
+        - "*.ts"
+        - "*.tsx"
+        - "*.js"
+        - "*.jsx"
+      exclude:
+        - "**/src/lib/api.ts"
+    patterns:
+      - pattern-either:
+          - pattern: localStorage.setItem($K, ...)
+          - pattern: window.localStorage.setItem($K, ...)
+          - pattern: sessionStorage.setItem($K, ...)
+          - pattern: window.sessionStorage.setItem($K, ...)
+      - metavariable-regex:
+          metavariable: $K
+          regex: (?i).*(token|jwt|auth|bearer|secret|session).*
+    metadata:
+      cwe: "CWE-922: Insecure Storage of Sensitive Information"
+      owasp: "A04:2021 - Insecure Design"

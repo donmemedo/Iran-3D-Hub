@@ -1,0 +1,119 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Least privilege: jobs only read the repo. Nothing here needs to write.
+permissions:
+  contents: read
+
+# A newer push to the same branch/PR cancels the superseded run.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (tests, bandit, pip-audit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements*.txt
+      - run: pip install -r backend/requirements-dev.txt
+      # Regression suite runs in-process (ASGI test client): no server, no network.
+      - name: Tests
+        working-directory: backend
+        run: python -m pytest
+      # SAST for Python. -ll reports medium severity and above.
+      - name: Bandit
+        run: bandit -r backend/app -ll
+      # Known-vulnerable runtime dependencies (OSV / PyPI advisories).
+      - name: pip-audit
+        run: pip-audit -r backend/requirements.txt
+
+  frontend:
+    name: Frontend (audit, build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      # Production dependencies only: dev-tool advisories do not ship to users.
+      - name: npm audit
+        run: npm audit --omit=dev --audit-level=high
+      # next build also type-checks (typescript.ignoreBuildErrors is false).
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_API_BASE: http://localhost:8400
+          NEXT_TELEMETRY_DISABLED: "1"
+
+  docker:
+    name: Docker (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [backend, frontend]
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      # Dockerfile lint. The image has a single binary; stdin avoids mounting the workspace.
+      - name: Hadolint
+        run: docker run --rm -i hadolint/hadolint:v2.12.0 /bin/hadolint --failure-threshold warning - < "${{ matrix.image }}/Dockerfile"
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Build image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: ./${{ matrix.image }}
+          load: true
+          push: false
+          tags: hub3d-${{ matrix.image }}:ci
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+
+      # Fails the job on HIGH/CRITICAL vulnerabilities that have a fix available.
+      # trivy-action publishes exact version tags only (no floating major); Dependabot bumps it.
+      - name: Trivy image scan
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: hub3d-${{ matrix.image }}:ci
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          vuln-type: os,library
+          exit-code: "1"
+          format: table
+
+      # SBOM (CycloneDX) of the exact image that was scanned, kept as a build artifact.
+      - name: Syft SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        with:
+          image: hub3d-${{ matrix.image }}:ci
+          format: cyclonedx-json
+          output-file: sbom-${{ matrix.image }}.cdx.json
+          artifact-name: sbom-${{ matrix.image }}
+          upload-artifact: true

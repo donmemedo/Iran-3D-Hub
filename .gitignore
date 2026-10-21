@@ -11,3 +11,29 @@ backend/data/
 
 .idea
 Docs
+
+# --- secrets and local config (only the *.example templates are committed) ---
+.env*
+!.env.example
+
+# --- local databases and SQLite WAL side files ---
+*.sqlite*
+*.db-wal
+*.db-shm
+*.db-journal
+
+# --- test and coverage output ---
+.pytest_cache/
+.coverage
+coverage/
+htmlcov/
+
+# --- security tooling output ---
+sbom/
+semgrep-results.*
+*.sarif
+
+# --- graphify cache (the graph itself is kept) ---
+graphify-out/cache/
+*.tsbuildinfo
+*.cdx.json

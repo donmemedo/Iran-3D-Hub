@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { useApp } from "@/components/Providers";
 import { Reveal } from "@/components/Reveal";
 import { Counter, Pill } from "@/components/Bits";
-import { api, post } from "@/lib/api";
+import { api, ApiError, post } from "@/lib/api";
+import type { Dict } from "@/lib/i18n";
 import { money, num } from "@/lib/format";
 
 type Row = {
@@ -18,25 +19,61 @@ type Row = {
   flow: string[];
 };
 
+const errCode = (e: unknown) => (e instanceof ApiError ? e.code : "unknown");
+
+/** Errors are kept as codes and turned into text at render time, so they follow the language switch. */
+function errText(t: Dict, code: string) {
+  if (code === "network_error") return t.errors.network;
+  return (t.errors as Record<string, string>)[code] ?? t.errors.unknown;
+}
+
 export default function Dashboard() {
   const { t, lang, user, ready } = useApp();
   const router = useRouter();
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [actionError, setActionError] = useState<{ id: string; code: string } | null>(null);
+  const [pending, setPending] = useState<string | null>(null);
+  const ctl = useRef<AbortController | null>(null);
 
   const load = useCallback(() => {
-    api<Row[]>("/api/orders").then(setRows).catch(() => {}).finally(() => setLoading(false));
-  }, []);
+    ctl.current?.abort();
+    const ac = new AbortController();
+    ctl.current = ac;
+    setLoadError("");
+    api<Row[]>("/api/orders?limit=50", { signal: ac.signal })
+      .then((r) => { if (!ac.signal.aborted) setRows(r); })
+      .catch((e: unknown) => {
+        if (ac.signal.aborted) return;
+        const code = errCode(e);
+        if (code === "not_authenticated" || code === "invalid_token") { router.replace("/login?next=/dashboard"); return; }
+        setLoadError(code);
+      })
+      .finally(() => { if (!ac.signal.aborted) setLoading(false); });
+  }, [router]);
 
   useEffect(() => {
     if (!ready) return;
     if (!user) { router.replace("/login?next=/dashboard"); return; }
     load();
+    return () => ctl.current?.abort();
   }, [ready, user, load, router]);
 
+  const isAdmin = user?.role === "admin";
+
   const act = async (id: string, what: "advance" | "cancel") => {
-    await post(`/api/orders/${id}/${what}`, {}).catch(() => {});
-    load();
+    if (pending) return;
+    setPending(id);
+    setActionError(null);
+    try {
+      await post(`/api/orders/${encodeURIComponent(id)}/${what}`, {});
+    } catch (e: unknown) {
+      setActionError({ id, code: errCode(e) });
+    } finally {
+      setPending(null);
+    }
+    load(); // refresh either way: on order_changed the list is what is out of date
   };
 
   const total = rows.reduce((s, r) => s + r.order.amount, 0);
@@ -69,10 +106,20 @@ export default function Dashboard() {
 
       <h2 className="mb-4 mt-10 text-[17px] font-extrabold">{t.dash.orders}</h2>
 
+      {loadError && (
+        <div role="alert" className="glass mb-4 flex flex-wrap items-center justify-between gap-3 rounded-3xl px-6 py-4">
+          <p className="text-[13.5px] font-semibold text-rose-500">{errText(t, loadError)}</p>
+          <button type="button" onClick={() => { setLoading(true); load(); }}
+            className="pressable rounded-xl bg-[rgb(var(--line)/0.09)] px-4 py-2 text-[12.5px] font-bold">
+            {t.common.retry}
+          </button>
+        </div>
+      )}
+
       {loading ? (
-        <div className="space-y-3">{[...Array(3)].map((_, i) => <div key={i} className="glass h-40 animate-pulse rounded-3xl" />)}</div>
+        <div className="space-y-3" aria-busy="true">{[...Array(3)].map((_, i) => <div key={i} className="glass h-40 animate-pulse rounded-3xl" />)}</div>
       ) : rows.length === 0 ? (
-        <div className="glass grid place-items-center rounded-3xl p-12 text-center">
+        loadError ? null : <div className="glass grid place-items-center rounded-3xl p-12 text-center">
           <p className="muted text-[14px]">{t.dash.empty}</p>
           <Link href="/quote" className="pressable mt-5 rounded-2xl bg-gradient-to-r from-[#00e5c0] to-[#7c5cff] px-6 py-3 text-[13.5px] font-extrabold text-[#05060b]">
             {t.dash.emptyCta}
@@ -82,6 +129,9 @@ export default function Dashboard() {
         <div className="space-y-3">
           {rows.map((r, i) => {
             const canceled = r.order.status === "canceled";
+            const open = !canceled && r.order.status !== "delivered";
+            const cancelable = open && r.order.status !== "shipped"; // the server refuses later cancels
+            const showActions = cancelable || (isAdmin && open);
             const statusKey = r.order.status as keyof typeof t.dash.status;
             return (
               <Reveal key={r.order.public_id} delay={Math.min(i, 5) * 0.05}>
@@ -113,13 +163,13 @@ export default function Dashboard() {
                   </div>
 
                   {!canceled && (
-                    <div className="mt-6">
+                    <div className="mt-6" aria-hidden>
                       <div className="flex items-center gap-1">
                         {r.flow.map((s, idx) => (
                           <div key={s} className="flex flex-1 items-center gap-1">
                             <motion.span
                               initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
-                              transition={{ type: "spring", bounce: 0.3, duration: 0.4, delay: idx * 0.04 }}
+                              transition={{ type: "spring", bounce: 0, duration: 0.4, delay: idx * 0.04 }}
                               className={`grid h-6 w-6 shrink-0 place-items-center rounded-full text-[10px] font-extrabold ${idx <= r.step ? "bg-gradient-to-br from-[#00e5c0] to-[#7c5cff] text-[#05060b]" : "bg-[rgb(var(--line)/0.1)] muted"}`}>
                               {idx < r.step ? "✓" : num(idx + 1, lang)}
                             </motion.span>
@@ -142,17 +192,25 @@ export default function Dashboard() {
                     </div>
                   )}
 
-                  {!canceled && r.order.status !== "delivered" && (
+                  {showActions && (
                     <div className="mt-5 flex flex-wrap gap-2">
-                      <button onClick={() => act(r.order.public_id, "advance")}
-                        className="pressable rounded-xl bg-[rgb(var(--line)/0.09)] px-4 py-2 text-[12.5px] font-bold">
-                        {t.dash.advance}
-                      </button>
-                      <button onClick={() => act(r.order.public_id, "cancel")}
-                        className="pressable rounded-xl px-4 py-2 text-[12.5px] font-bold text-rose-500 hover:bg-rose-500/10">
-                        {t.dash.cancel}
-                      </button>
+                      {isAdmin && (
+                        <button type="button" onClick={() => act(r.order.public_id, "advance")} disabled={pending !== null}
+                          className="pressable rounded-xl bg-[rgb(var(--line)/0.09)] px-4 py-2 text-[12.5px] font-bold disabled:opacity-60">
+                          {t.dash.advance}
+                        </button>
+                      )}
+                      {cancelable && (
+                        <button type="button" onClick={() => act(r.order.public_id, "cancel")} disabled={pending !== null}
+                          className="pressable rounded-xl px-4 py-2 text-[12.5px] font-bold text-rose-500 hover:bg-rose-500/10 disabled:opacity-60">
+                          {t.dash.cancel}
+                        </button>
+                      )}
                     </div>
+                  )}
+
+                  {actionError?.id === r.order.public_id && (
+                    <p role="alert" className="mt-3 text-[12.5px] font-semibold text-rose-500">{errText(t, actionError.code)}</p>
                   )}
                 </div>
               </Reveal>

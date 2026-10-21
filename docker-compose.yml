@@ -1,39 +1,89 @@
+# 3D Hub Iran: backend (FastAPI) + frontend (Next.js standalone).
+#
+# Quick start (the stack refuses to start without JWT_SECRET):
+#   export JWT_SECRET=$(openssl rand -hex 32)       # or: make secret, then put it in .env
+#   docker compose up --build
+#   frontend http://localhost:3560    API http://localhost:8400/api/health
+#
+# Demo mode (public demo account demo@3dhub.ir / demo1234 + the login-page demo button).
+# NEXT_PUBLIC_DEMO is baked in at build time, so pass --build. Never use this in production:
+#   SEED_DEMO=true NEXT_PUBLIC_DEMO=1 docker compose up --build
+#
+# Exposure: ports bind to 127.0.0.1 so a laptop run is not reachable from the LAN. For a
+# server, put a TLS reverse proxy in front, set CORS_ORIGINS and NEXT_PUBLIC_API_BASE to the
+# public origins (rebuild the frontend), set FORWARDED_ALLOW_IPS to the proxy address, and
+# only then consider BIND=0.0.0.0. All variables are documented in .env.example.
+
+x-hardened: &hardened
+  init: true                      # tini as PID 1: reaps zombies, forwards signals
+  restart: unless-stopped
+  read_only: true                 # root filesystem is immutable; writable paths are listed below
+  cap_drop: [ALL]                 # neither service needs any Linux capability (ports > 1024)
+  security_opt:
+    - no-new-privileges:true
+  logging:                        # bounded logs: a noisy client cannot fill the disk
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
 services:
   backend:
+    <<: *hardened
     build:
       context: ./backend
     container_name: hub3d-backend
     environment:
-      DATABASE_URL: sqlite:///./data/hub3d.db
-      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET (openssl rand -hex 32)}
+      DEV: ${DEV:-false}
+      SEED_DEMO: ${SEED_DEMO:-false}
+      DATABASE_URL: ${DATABASE_URL:-sqlite:////app/data/hub3d.db}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3560}
-      PLATFORM_COMMISSION: "0.15"
+      PLATFORM_COMMISSION: ${PLATFORM_COMMISSION:-0.15}
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-60}
+      LOGIN_RATE_LIMIT: ${LOGIN_RATE_LIMIT:-10}
+      ORDERS_PER_HOUR: ${ORDERS_PER_HOUR:-60}
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-127.0.0.1}
     volumes:
-      - backend-data:/app/data
+      - backend-data:/app/data    # SQLite (WAL): the only persistent, writable path
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=128m   # multipart upload spool (max 60 MB per file)
     ports:
-      - "8400:8000"
+      - "${BIND:-127.0.0.1}:8400:8000"
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/api/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
       interval: 15s
       timeout: 5s
       retries: 5
       start_period: 10s
-    restart: unless-stopped
+    pids_limit: 128
+    mem_limit: 512m
+    memswap_limit: 512m           # same as mem_limit: no swap
+    cpus: 1.0
 
   frontend:
+    <<: *hardened
     build:
       context: ./frontend
       args:
+        # Build-time only (inlined into the browser bundle); the running container ignores them.
         NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-http://localhost:8400}
+        NEXT_PUBLIC_DEMO: ${NEXT_PUBLIC_DEMO:-}
     container_name: hub3d-frontend
     environment:
-      NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-http://localhost:8400}
+      HOSTNAME: 0.0.0.0           # bind all interfaces inside the container
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
+      - /app/.next/cache:rw,noexec,nosuid,nodev,size=64m   # Next.js image-optimiser cache
     ports:
-      - "3560:3000"
+      - "${BIND:-127.0.0.1}:3560:3000"
     depends_on:
       backend:
         condition: service_healthy
-    restart: unless-stopped
+    pids_limit: 256
+    mem_limit: 512m
+    memswap_limit: 512m
+    cpus: 1.0
 
 volumes:
   backend-data:
