@@ -21,7 +21,7 @@ STRONG_SECRET = "pt-secret-local-only-" + "x" * 32
 # A private temp dir: other processes cleaning /tmp must not be able to delete our databases.
 TMP = tempfile.mkdtemp(prefix="h3d-pytest-")
 _ENV_KEYS = ("JWT_SECRET", "DEV", "SEED_DEMO", "LOGIN_RATE_LIMIT", "MAX_UPLOAD_MB", "MAX_JSON_KB",
-             "CORS_ORIGINS", "DATABASE_URL", "ORDERS_PER_HOUR")
+             "CORS_ORIGINS", "DATABASE_URL", "ORDERS_PER_HOUR", "ANALYZE_PER_MINUTE", "MAX_PARALLEL_PARSES")
 
 
 @pytest.fixture(scope="session", autouse=True)

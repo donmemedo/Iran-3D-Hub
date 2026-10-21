@@ -302,6 +302,26 @@ def test_oversized_upload_is_rejected_early():
         cl.__exit__(None, None, None)
 
 
+def test_uploads_are_rate_limited_and_parses_are_capped(monkeypatch):
+    cl = client(ANALYZE_PER_MINUTE="3", MAX_PARALLEL_PARSES="1")
+    try:
+        up = lambda: cl.post("/api/quotes/analyze", files={"file": ("c.stl", cube_stl(), "application/octet-stream")})
+        assert [up().status_code for _ in range(4)] == [200, 200, 200, 429]
+    finally:
+        cl.__exit__(None, None, None)
+    cl = client(MAX_PARALLEL_PARSES="1")
+    try:
+        from app.routers import quotes
+        assert quotes._parse_slots.acquire(blocking=False)   # a parse is already running
+        try:
+            r = cl.post("/api/quotes/analyze", files={"file": ("c.stl", cube_stl(), "application/octet-stream")})
+            assert r.status_code == 503 and r.headers.get("retry-after")
+        finally:
+            quotes._parse_slots.release()
+    finally:
+        cl.__exit__(None, None, None)
+
+
 def test_every_parser_honours_the_triangle_cap(monkeypatch):
     fresh_app()
     from app import geometry

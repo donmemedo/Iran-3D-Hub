@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     login_rate_limit: int = 10             # attempts per IP per window (login + register)
     login_rate_window_s: int = 60
     orders_per_hour: int = 60              # per user
+    analyze_per_minute: int = 30           # mesh uploads per IP
+    max_parallel_parses: int = 2           # CPU-bound mesh parses running at once
 
 
 def _guard(s: Settings) -> Settings:

@@ -1,9 +1,11 @@
 import os
 import re
+import threading
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from sqlmodel import Session, select
 
+from .. import ratelimit
 from ..config import settings
 from ..db import get_session
 from ..geometry import MeshStats, analyse
@@ -14,6 +16,10 @@ from ..security import current_user, sign_quote
 
 router = APIRouter(prefix="/api/quotes", tags=["quotes"])
 
+# Parsing is CPU-bound pure Python: at most N run at once, the rest are told to retry.
+# ponytail: threadpool + semaphore. Move parsing to a worker process/queue when uploads
+# exceed ~1/s (python-background-jobs: arq/RQ) so it cannot contend for the GIL at all.
+_parse_slots = threading.BoundedSemaphore(settings.max_parallel_parses)
 ALLOWED_EXT = {".stl", ".obj", ".step", ".stp", ".iges", ".igs", ".3mf"}
 _SAFE_NAME = re.compile(r"[^\w.\- ()؀-ۿ]")
 
@@ -92,6 +98,7 @@ def _build(session: Session, filename: str, stats: MeshStats, p) -> dict:
 # FastAPI's threadpool, otherwise one upload would freeze the event loop for everyone.
 @router.post("/analyze")
 def analyze(
+    request: Request,
     file: UploadFile = File(...),
     material_slug: str = Form("pla", min_length=1, max_length=32, pattern=r"^[a-z0-9-]+$"),
     quality: Quality = Form("standard"),
@@ -100,6 +107,8 @@ def analyze(
     city: City = Form("tehran"),
     session: Session = Depends(get_session),
 ):
+    if not ratelimit.hit(f"analyze:{ratelimit.client_ip(request)}", settings.analyze_per_minute, 60):
+        raise ratelimit.too_many(60)
     name = clean_filename(file.filename or "model.stl")
     if os.path.splitext(name)[1].lower() not in ALLOWED_EXT:
         raise HTTPException(422, "unsupported_file_type")
@@ -107,7 +116,12 @@ def analyze(
     data = file.file.read(limit + 1)              # never reads more than limit + 1 bytes
     if len(data) > limit:
         raise HTTPException(413, "file_too_large")
-    stats = analyse(name, data)
+    if not _parse_slots.acquire(blocking=False):
+        raise HTTPException(503, "busy", headers={"Retry-After": "2"})
+    try:
+        stats = analyse(name, data)
+    finally:
+        _parse_slots.release()
     params = QuoteParams(material_slug=material_slug, quality=quality, infill=infill,
                          quantity=quantity, city=city)
     return _build(session, name, stats, params)
