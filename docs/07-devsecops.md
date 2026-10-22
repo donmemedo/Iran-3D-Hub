@@ -203,3 +203,19 @@ Expose metrics on an internal port or a protected path, **not** under `/api/`: t
 | DAST | None in the pipeline. The live probe (28 checks, 27 passed) was a manual run against a running stack, and the script that produced it is not committed. |
 | Case-insensitive checkouts | `.gitignore:13` lists `Docs`. On a case-insensitive filesystem git may treat the new `docs/` directory as ignored. Reasoned, not tested. |
 | Deployment | There is no CD stage, staging environment or image registry. |
+
+
+## Addendum: first CI run on the pull request (2026-10-22)
+
+The workflows ran for the first time when the PR was opened. Results and what was done:
+
+| Job | First result | Cause | Action |
+|---|---|---|---|
+| Backend (tests, bandit, pip-audit) | pass | 60 tests, bandit and pip-audit all green on GitHub's runners | none |
+| CodeQL (python, javascript-typescript) | pass | | none |
+| Docker (backend) | pass | image builds, hadolint and Trivy clean | none |
+| Frontend (audit, build) | fail | `npm audit` found `sharp`, `source-map-js` and the `postcss` bundled inside `next` (4 advisories); this had been missed locally because the earlier audit was run from the wrong directory | `npm audit fix`, plus an `overrides` entry pinning `postcss` 8.5.31; `npm audit` now reports 0 vulnerabilities, rebuilt and verified |
+| Docker (frontend) | fail | Trivy: 16 HIGH, five in the `npm` CLI shipped inside the Node base image, three from the same old app dependencies | npm, corepack and yarn removed from the runtime stage; lockfile fix as above |
+| Secrets (gitleaks) | fail | false positive: the throwaway test secret in `backend/tests/conftest.py` | narrow regex allowlist in `.gitleaks.toml` (the pattern `pt-secret-...`, not the whole tests folder) |
+| SAST (semgrep) | fail | Dependabot config without a cooldown | 7-day cooldown on every ecosystem; the two Docker blocks merged |
+| Dependency review | fail | "Dependency graph" is disabled in the repository settings, so the action cannot run at all | made non-blocking with a comment; enable Settings > Code security > Dependency graph, then remove `continue-on-error` |

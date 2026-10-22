@@ -31,6 +31,12 @@ RUN npm run build
 FROM node:22-alpine AS runner
 WORKDIR /app
 
+# The runtime only runs `node server.js`. The npm CLI bundled in the base image is the source of
+# most "HIGH" Trivy findings (brace-expansion, picomatch, pacote, sigstore, ip-address) and is an
+# attacker's package installer if the container is ever compromised: remove it.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
+           /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /opt/yarn-*
+
 # HOSTNAME=0.0.0.0: Docker sets HOSTNAME to the container id otherwise, and the standalone
 # server would bind only that address (the healthcheck on 127.0.0.1 would fail).
 ENV NODE_ENV=production \

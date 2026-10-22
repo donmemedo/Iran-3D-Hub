@@ -1,15 +1,21 @@
 version: 2
+# cooldown: wait 7 days before proposing a freshly published version (a compromised or broken release
+# is usually pulled within days). Security advisories are NOT delayed by the cooldown.
 updates:
   - package-ecosystem: pip
     directory: /backend
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 5
 
   - package-ecosystem: npm
     directory: /frontend
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 5
     groups:
       # Type packages move together; one PR instead of five.
@@ -18,16 +24,15 @@ updates:
 
   # Dockerfile base images (tag bumps; add digest pinning through Renovate if wanted).
   - package-ecosystem: docker
-    directory: /backend
+    directories: [/backend, /frontend]
     schedule:
       interval: weekly
-
-  - package-ecosystem: docker
-    directory: /frontend
-    schedule:
-      interval: weekly
+    cooldown:
+      default-days: 7
 
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7

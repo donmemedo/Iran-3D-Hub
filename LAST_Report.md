@@ -70,7 +70,8 @@ Performance cost of the security changes is stated per control in `docs/05-perfo
 | OSV on installed backend packages | only `pip` itself (build tooling, removed from the runtime image) |
 | Production build | passes; home route 167 kB first-load JS |
 | Frontend type check | clean |
-| Docker | `compose config` validates and refuses to start without `JWT_SECRET`; images not built (daemon down) |
+| Docker | `compose config` validates and refuses to start without `JWT_SECRET`; not built locally (daemon down), but the backend image builds and passes Trivy in CI |
+| CI, first run | Backend tests, CodeQL and backend image pass; the rest failed on real configuration and dependency issues that are fixed in the follow-up commit |
 
 ## 7. Still open, accepted, or found but not fixed
 
@@ -86,7 +87,7 @@ Fixed code is not the same as a finished product. These need an owner's decision
 |---|---|---|
 | APK and IPA | You asked for the web app first. These need payment and store-policy decisions and developer accounts | Phase 3 of [`docs/10-implementation-plan.md`](docs/10-implementation-plan.md) (Trusted Web Activity or Capacitor) |
 | Docker image build and scan | The Docker daemon was not running | `docker compose up --build`, then the Trivy step in CI |
-| CI run on GitHub | The workflows were just added | Open the PR and watch the first run; expect to tune Semgrep and CodeQL |
+| Clean CI on GitHub | The first run found real issues (npm audit, base-image npm, Dependabot cooldown, gitleaks false positive); all fixed in the follow-up commit, see the addendum in `docs/07-devsecops.md`. Dependency review needs the repository's Dependency graph switched on | Enable Dependency graph, then confirm the next run is green |
 | Lighthouse and a browser-driven upload flow | Memory pressure, and no browser automation installed beyond headless screenshots | Run Lighthouse and add a Playwright test |
 | Deferred simplifications | About 440 lines of possible cleanup, mostly frontend, each needing another 6-minute build | [`docs/12-ponytail-review.md`](docs/12-ponytail-review.md) |
 | Stopping the 29 other Claude sessions | They belong to other projects | Close them; they hold about 12 GB |

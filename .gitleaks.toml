@@ -23,5 +23,5 @@ paths = [
 ]
 regexes = [
   '''demo1234''',                      # public demo password (SEED_DEMO only)
-  '''pt-secret-local-only-x+''',       # fixed fake secret used by backend/tests/conftest.py
+  '''pt-secret-[A-Za-z0-9-]+''',       # fixed fake secret used only by backend/tests/conftest.py
 ]

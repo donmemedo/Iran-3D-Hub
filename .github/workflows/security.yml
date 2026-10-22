@@ -80,6 +80,9 @@ jobs:
   dependency-review:
     name: Dependency review
     if: github.event_name == 'pull_request'
+    # Non-blocking until "Dependency graph" is enabled in Settings > Code security (it was off on the
+    # first run, which fails this action regardless of the diff). Remove this line once it is on.
+    continue-on-error: true
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
