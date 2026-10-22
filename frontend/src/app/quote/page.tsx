@@ -224,7 +224,7 @@ export default function QuotePage() {
       </header>
 
       {catalogError && (
-        <div role="alert" className="glass mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl px-5 py-3 text-[13px] font-semibold text-rose-500">
+        <div role="alert" className="glass mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl px-5 py-3 text-[13px] font-semibold text-rose-600 dark:text-rose-400">
           <span>{errText(t, catalogError)}</span>
           <button type="button" onClick={() => setCatalogTry((n) => n + 1)}
             className="pressable rounded-xl bg-[rgb(var(--line)/0.09)] px-4 py-1.5 text-[12.5px] font-bold text-[var(--fg)]">
@@ -249,14 +249,15 @@ export default function QuotePage() {
             onClick={openPicker}
             animate={{ scale: dragging ? 1.015 : 1 }}
             transition={{ type: "spring", bounce: 0, duration: 0.4 }}
-            className={`glass relative cursor-pointer overflow-hidden rounded-[1.75rem] p-6 text-center outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[#00e5c0] ${dragging ? "ring-2 ring-[#00e5c0]" : ""}`}>
+            className={`glass relative cursor-pointer overflow-hidden rounded-[1.75rem] p-6 text-center outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--focus)] ${dragging ? "ring-2 ring-[var(--focus)]" : ""}`}>
             <input ref={inputRef} type="file" accept=".stl,.obj,.step,.stp,.iges,.igs,.3mf" className="hidden" tabIndex={-1}
               onClick={(e) => e.stopPropagation()}
               onChange={(e) => { const f = e.target.files?.[0]; if (f) accept(f); e.target.value = ""; }} />
 
             {buffer ? (
               <div className="relative">
-                <div role="img" aria-label={t.a11y.viewer}>
+                {/* stopPropagation: releasing a drag on the model must not open the file chooser */}
+                <div onClick={(e) => e.stopPropagation()}>
                   <StlViewer buffer={buffer} className="h-[260px] w-full sm:h-[320px]" />
                 </div>
                 <div className="pointer-events-none absolute inset-x-0 bottom-0">
@@ -280,7 +281,7 @@ export default function QuotePage() {
           </motion.div>
 
           {quoteError && (
-            <p role="alert" className="px-2 text-[12.5px] font-semibold text-rose-500">{errText(t, quoteError)}</p>
+            <p role="alert" className="px-2 text-[12.5px] font-semibold text-rose-600 dark:text-rose-400">{errText(t, quoteError)}</p>
           )}
 
           {!file && (
@@ -476,7 +477,7 @@ export default function QuotePage() {
                   <textarea value={note} onChange={(e) => setNote(e.target.value)}
                     placeholder={t.quote.note} aria-label={t.quote.note} maxLength={1000} rows={2}
                     className="hairline w-full resize-none rounded-2xl border bg-transparent px-4 py-3 text-[13.5px] outline-none focus:ring-2 focus:ring-[#00e5c0]/50" />
-                  {orderError && <p role="alert" className="text-[12.5px] font-semibold text-rose-500">{errText(t, orderError)}</p>}
+                  {orderError && <p role="alert" className="text-[12.5px] font-semibold text-rose-600 dark:text-rose-400">{errText(t, orderError)}</p>}
                   <button type="button" onClick={placeOrder} disabled={placing} aria-busy={placing}
                     className="pressable w-full rounded-2xl bg-gradient-to-r from-[#00e5c0] to-[#7c5cff] px-6 py-3.5 text-[14.5px] font-extrabold text-[#05060b] shadow-xl shadow-[#7c5cff]/25 disabled:opacity-60">
                     {placing ? t.common.loading : t.quote.submit}

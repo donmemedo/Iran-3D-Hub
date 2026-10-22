@@ -137,7 +137,7 @@ function LoginInner() {
             autoComplete={mode === "login" ? "current-password" : "new-password"}
             aria-invalid={error ? true : undefined} aria-describedby={described} />
 
-          {error && <p id="auth-error" role="alert" className="text-[12.5px] font-semibold text-rose-500">{authMessage(t, lang, error)}</p>}
+          {error && <p id="auth-error" role="alert" className="text-[12.5px] font-semibold text-rose-600 dark:text-rose-400">{authMessage(t, lang, error)}</p>}
 
           <button type="submit" disabled={busy} aria-busy={busy}
             className="pressable w-full rounded-2xl bg-gradient-to-r from-[#00e5c0] to-[#7c5cff] px-6 py-3.5 text-[14.5px] font-extrabold text-[#05060b] shadow-xl shadow-[#7c5cff]/25 disabled:opacity-60">

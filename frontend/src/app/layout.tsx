@@ -7,7 +7,7 @@ import { Footer } from "@/components/Footer";
 import { SwRegister } from "@/components/SwRegister";
 
 export const metadata: Metadata = {
-  title: "هاب سه‌بعدی ایران | 3D Hub Iran",
+  title: { default: "هاب سه‌بعدی ایران | 3D Hub Iran", template: "%s | هاب سه‌بعدی ایران" },
   description:
     "بازارگاه آنلاین سفارش چاپ سه‌بعدی و ساخت افزایشی در ایران — قیمت آنی، شبکه تولیدکننده‌های تاییدشده و تحویل شهری.",
   manifest: "/manifest.webmanifest",

@@ -108,7 +108,7 @@ export default function Dashboard() {
 
       {loadError && (
         <div role="alert" className="glass mb-4 flex flex-wrap items-center justify-between gap-3 rounded-3xl px-6 py-4">
-          <p className="text-[13.5px] font-semibold text-rose-500">{errText(t, loadError)}</p>
+          <p className="text-[13.5px] font-semibold text-rose-600 dark:text-rose-400">{errText(t, loadError)}</p>
           <button type="button" onClick={() => { setLoading(true); load(); }}
             className="pressable rounded-xl bg-[rgb(var(--line)/0.09)] px-4 py-2 text-[12.5px] font-bold">
             {t.common.retry}
@@ -202,7 +202,7 @@ export default function Dashboard() {
                       )}
                       {cancelable && (
                         <button type="button" onClick={() => act(r.order.public_id, "cancel")} disabled={pending !== null}
-                          className="pressable rounded-xl px-4 py-2 text-[12.5px] font-bold text-rose-500 hover:bg-rose-500/10 disabled:opacity-60">
+                          className="pressable rounded-xl px-4 py-2 text-[12.5px] font-bold text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 disabled:opacity-60">
                           {t.dash.cancel}
                         </button>
                       )}
@@ -210,7 +210,7 @@ export default function Dashboard() {
                   )}
 
                   {actionError?.id === r.order.public_id && (
-                    <p role="alert" className="mt-3 text-[12.5px] font-semibold text-rose-500">{errText(t, actionError.code)}</p>
+                    <p role="alert" className="mt-3 text-[12.5px] font-semibold text-rose-600 dark:text-rose-400">{errText(t, actionError.code)}</p>
                   )}
                 </div>
               </Reveal>

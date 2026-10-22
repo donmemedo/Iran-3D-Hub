@@ -103,7 +103,7 @@ export default function HubsPage() {
         </div>
       ) : error ? (
         <div role="alert" className="glass grid h-52 place-items-center gap-3 rounded-3xl p-6 text-center">
-          <p className="text-[14px] font-semibold text-rose-500">{errText(t, error)}</p>
+          <p className="text-[14px] font-semibold text-rose-600 dark:text-rose-400">{errText(t, error)}</p>
           <button type="button" onClick={() => setAttempt((n) => n + 1)}
             className="pressable rounded-2xl bg-[rgb(var(--line)/0.09)] px-5 py-2.5 text-[13px] font-bold">
             {t.common.retry}

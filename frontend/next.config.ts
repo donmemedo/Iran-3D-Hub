@@ -40,6 +40,9 @@ const config: NextConfig = {
   reactStrictMode: true,
   output: "standalone",
   poweredByHeader: false,
+  // No next/image anywhere in src/: turning the optimiser off removes the /_next/image endpoint
+  // (and the sharp/libvips attack surface behind it) instead of leaving it exposed.
+  images: { unoptimized: true },
   eslint: { ignoreDuringBuilds: true },
   typescript: { ignoreBuildErrors: false },
   async headers() {
