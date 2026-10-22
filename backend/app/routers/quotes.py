@@ -5,7 +5,6 @@ import threading
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from sqlmodel import Session, select
 
-from .. import ratelimit
 from ..config import settings
 from ..db import get_session
 from ..geometry import MeshStats, analyse
@@ -83,8 +82,9 @@ def _build(session: Session, filename: str, stats: MeshStats, p) -> dict:
         "lead_time_days": lead, "print_hours": pricing["print_hours"],
         "warnings": ",".join(warnings),
     }
+    signed = {**snapshot, "platform_fee": pricing["platform_fee"]}  # not a Quote column: used for the order's commission
     return {
-        "quote": {**snapshot, "public_id": sign_quote(snapshot)},
+        "quote": {**snapshot, "public_id": sign_quote(signed)},
         "mesh": {"volume_cm3": stats.volume_cm3, "surface_cm2": stats.surface_cm2,
                  "bbox": list(stats.bbox), "triangles": stats.triangles, "exact": stats.exact},
         "pricing": pricing,
@@ -98,7 +98,6 @@ def _build(session: Session, filename: str, stats: MeshStats, p) -> dict:
 # FastAPI's threadpool, otherwise one upload would freeze the event loop for everyone.
 @router.post("/analyze")
 def analyze(
-    request: Request,
     file: UploadFile = File(...),
     material_slug: str = Form("pla", min_length=1, max_length=32, pattern=r"^[a-z0-9-]+$"),
     quality: Quality = Form("standard"),
@@ -107,18 +106,18 @@ def analyze(
     city: City = Form("tehran"),
     session: Session = Depends(get_session),
 ):
-    if not ratelimit.hit(f"analyze:{ratelimit.client_ip(request)}", settings.analyze_per_minute, 60):
-        raise ratelimit.too_many(60)
+    # The per-IP rate limit and the in-flight upload cap live in BodyLimit (middleware.py): they
+    # must answer before the multipart body is received, not after it has been spooled.
     name = clean_filename(file.filename or "model.stl")
     if os.path.splitext(name)[1].lower() not in ALLOWED_EXT:
         raise HTTPException(422, "unsupported_file_type")
     limit = settings.max_upload_mb * 1024 * 1024
-    data = file.file.read(limit + 1)              # never reads more than limit + 1 bytes
-    if len(data) > limit:
-        raise HTTPException(413, "file_too_large")
-    if not _parse_slots.acquire(blocking=False):
+    if not _parse_slots.acquire(blocking=False):   # take the slot BEFORE holding up to 60 MB in RAM
         raise HTTPException(503, "busy", headers={"Retry-After": "2"})
     try:
+        data = file.file.read(limit + 1)           # never reads more than limit + 1 bytes
+        if len(data) > limit:
+            raise HTTPException(413, "file_too_large")
         stats = analyse(name, data)
     finally:
         _parse_slots.release()

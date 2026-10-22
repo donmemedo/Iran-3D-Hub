@@ -1,18 +1,20 @@
-"""Tiny in-process sliding-window limiter (O(1) per hit, bounded memory).
+"""Tiny in-process sliding-window limiter: O(1) per hit, hard cap on memory.
 
+At most _MAX_KEYS buckets are kept; when full the least recently used one is evicted, so
+an attacker rotating keys can neither grow memory nor slow every call (no table scans).
 ponytail: per-process counters. With several workers/replicas the effective limit is
-N x limit; move to nginx limit_req or Redis when you scale out.
+N x limit; move to nginx limit_req or Redis when you scale out (docs/10-implementation-plan.md).
 """
 import threading
 import time
-from collections import deque
+from collections import OrderedDict, deque
 
 from fastapi import HTTPException, Request
 
 from .config import settings
 
 _lock = threading.Lock()
-_buckets: dict[str, deque] = {}
+_buckets: "OrderedDict[str, deque]" = OrderedDict()
 _MAX_KEYS = 20_000
 
 
@@ -25,14 +27,17 @@ def hit(key: str, limit: int, window: float) -> bool:
     """Record an attempt; False when the caller is over the limit."""
     now = time.monotonic()
     with _lock:
-        dq = _buckets.setdefault(key, deque())
+        dq = _buckets.get(key)
+        if dq is None:
+            dq = _buckets[key] = deque()
+        else:
+            _buckets.move_to_end(key)
         _prune(dq, now, window)
         if len(dq) >= limit:
             return False
         dq.append(now)
-        if len(_buckets) > _MAX_KEYS:  # attacker rotating keys cannot grow memory forever
-            for k in [k for k, v in _buckets.items() if not v or now - v[-1] > window]:
-                _buckets.pop(k, None)
+        while len(_buckets) > _MAX_KEYS:
+            _buckets.popitem(last=False)  # least recently used
         return True
 
 
@@ -52,8 +57,13 @@ def forget(key: str) -> None:
         _buckets.pop(key, None)
 
 
+def peer_ip(scope) -> str:
+    client = scope.get("client")
+    return client[0] if client else "unknown"
+
+
 def client_ip(request: Request) -> str:
-    return request.client.host if request.client else "unknown"
+    return peer_ip(request.scope)
 
 
 def too_many(retry_after: int) -> HTTPException:

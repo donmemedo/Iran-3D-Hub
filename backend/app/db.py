@@ -33,6 +33,7 @@ if is_sqlite:
 # existing tables, so indexes and the review.order_id column are applied here.
 # ponytail: hand-rolled for 1 column + 4 indexes, switch to Alembic when moving to Postgres.
 _UPGRADES = [
+    'UPDATE "user" SET email = lower(email) WHERE email != lower(email)',  # login lower-cases lookups
     'CREATE UNIQUE INDEX IF NOT EXISTS ux_quote_public_id ON quote (public_id)',
     'CREATE UNIQUE INDEX IF NOT EXISTS ux_order_public_id ON "order" (public_id)',
     'CREATE INDEX IF NOT EXISTS ix_order_user_id ON "order" (user_id)',

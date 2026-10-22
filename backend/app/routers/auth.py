@@ -35,10 +35,15 @@ def register(body: RegisterIn, session: Session = Depends(get_session)):
 
 @router.post("/login", dependencies=[Depends(ratelimit.auth_limit)])
 def login(body: LoginIn, request: Request, session: Session = Depends(get_session)):
-    # Per-account failure budget stops a distributed guesser even when every IP is fresh.
-    # It counts failures only, so it cannot be used to lock a victim out by just hitting login.
-    acct = f"fail:{body.email}"
-    if ratelimit.over(acct, settings.login_rate_limit, 600):
+    # Two failure budgets over 10 minutes, counting failures only:
+    #  * (email, ip): a single source gets login_rate_limit guesses per account;
+    #  * email: a hard ceiling of 10x that across ALL sources, so a botnet cannot guess forever.
+    # Known trade-off: ~100 requests spread over many IPs can still lock one account for 10 minutes
+    # (a victim from a clean IP gets 429). Accepted for now; see docs/03-security-audit.md.
+    ip = ratelimit.client_ip(request)
+    acct, acct_ip = f"fail:{body.email}", f"fail:{body.email}:{ip}"
+    if ratelimit.over(acct_ip, settings.login_rate_limit, 600) or \
+            ratelimit.over(acct, settings.login_rate_limit * 10, 600):
         raise ratelimit.too_many(600)
     user = session.exec(select(User).where(User.email == body.email)).first()
     if user is None:
@@ -47,10 +52,11 @@ def login(body: LoginIn, request: Request, session: Session = Depends(get_sessio
     else:
         ok = verify_password(body.password, user.password_hash)
     if not ok:
-        ratelimit.hit(acct, settings.login_rate_limit, 600)
-        audit.warning("login_failed ip=%s", ratelimit.client_ip(request))
+        ratelimit.hit(acct_ip, settings.login_rate_limit, 600)
+        ratelimit.hit(acct, settings.login_rate_limit * 10, 600)
+        audit.warning("login_failed ip=%s", ip)
         raise HTTPException(401, "invalid_credentials")
-    ratelimit.forget(acct)
+    ratelimit.forget(acct_ip)
     if needs_rehash(user.password_hash):  # silently upgrade legacy hashes on successful login
         user.password_hash = hash_password(body.password)
         session.add(user)

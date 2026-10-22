@@ -47,7 +47,7 @@ class LoginIn(BaseModel):
 
 class OrderIn(BaseModel):
     quote_public_id: str = Field(min_length=10, max_length=2000)  # the signed quote token
-    hub_id: int | None = Field(None, ge=1)
+    hub_id: int | None = Field(None, ge=1, le=2**31 - 1)
     address: str = Field(min_length=5, max_length=500)
     note: str = Field("", max_length=1000)
 

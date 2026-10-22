@@ -4,8 +4,12 @@ Pure-python parsers (no numpy/native deps) for binary STL, ASCII STL and OBJ.
 Volume comes from the signed-tetrahedron sum over every triangle, which is the
 same method slicers use, so the instant quote is grounded in the real part.
 
-Every parser is bounded: at most MAX_TRIANGLES triangles are read, so parse time and
-memory have a hard ceiling no matter what an attacker uploads.
+Every parser is bounded so one upload cannot exhaust CPU or the container's memory:
+  * text formats (OBJ / ASCII STL) larger than MAX_TEXT_BYTES are not parsed at all,
+  * at most MAX_TRIANGLES triangles and MAX_LINES lines are read,
+  * parsing works on raw bytes: no decode, no second copy of a 25 MB file.
+Measured before these limits (idle machine, 60 MiB hostile text file): 3.6-19.6 s CPU and
+370-552 MB RSS, which is why the ceilings below exist. See docs/05-performance.md.
 """
 from __future__ import annotations
 
@@ -14,13 +18,14 @@ import math
 import re
 import struct
 from dataclasses import dataclass, field
-from typing import Iterable, List, Tuple
+from typing import List, Tuple
 
 Vec = Tuple[float, float, float]
 Tri = Tuple[Vec, Vec, Vec]
 
-# ~0.6 s of pure-python work in the worst case; real printable parts are far below this.
-MAX_TRIANGLES = 500_000
+MAX_TRIANGLES = 250_000          # ~12 MB binary STL; real printable parts are far below this
+MAX_TEXT_BYTES = 25 * 1024 * 1024
+MAX_LINES = 3_000_000            # blank/garbage lines cost time too, so they are budgeted
 
 
 @dataclass
@@ -91,14 +96,14 @@ def _parse_binary_stl(data: bytes) -> Tuple[List[Tri], bool]:
     return tris, min(declared, available) > MAX_TRIANGLES  # type: ignore[return-value]
 
 
-_VERTEX = re.compile(r"vertex\s+(\S+)\s+(\S+)\s+(\S+)")
+_VERTEX = re.compile(rb"vertex\s+(\S+)\s+(\S+)\s+(\S+)")
 
 
-def _parse_ascii_stl(text: str) -> Tuple[List[Tri], bool]:
+def _parse_ascii_stl(data: bytes) -> Tuple[List[Tri], bool]:
     verts: List[Vec] = []
     cap = MAX_TRIANGLES * 3
     truncated = False
-    for m in _VERTEX.finditer(text):
+    for m in _VERTEX.finditer(data):
         if len(verts) >= cap:
             truncated = True
             break
@@ -110,24 +115,25 @@ def _parse_ascii_stl(text: str) -> Tuple[List[Tri], bool]:
     return tris, truncated  # type: ignore[return-value]
 
 
-def _parse_obj(text: str) -> Tuple[List[Tri], bool]:
+def _parse_obj(data: bytes) -> Tuple[List[Tri], bool]:
     verts: List[Vec] = []
     tris: List[Tri] = []
-    truncated = False
-    for line in io.StringIO(text):               # lazy: no list of millions of lines
-        if line.startswith("v "):
-            if len(verts) >= MAX_TRIANGLES * 3:
-                return [], True                   # absurd vertex count: refuse, flag for review
+    for n, line in enumerate(io.BytesIO(data)):   # lazy bytes lines: no giant list, no decode
+        if n >= MAX_LINES:
+            return tris, True
+        if line.startswith(b"v "):
+            if len(verts) >= MAX_TRIANGLES:       # a 250k-triangle mesh has far fewer vertices
+                return [], True
             p = line.split()
             try:
                 verts.append((float(p[1]), float(p[2]), float(p[3])))
             except (ValueError, IndexError):
                 continue
-        elif line.startswith("f "):
+        elif line.startswith(b"f "):
             idx = []
             try:
                 for tok in line.split()[1:]:
-                    i = int(tok.split("/")[0])
+                    i = int(tok.split(b"/")[0])
                     j = i - 1 if i > 0 else len(verts) + i
                     if not 0 <= j < len(verts):   # negative wrap-around / out of range
                         raise IndexError
@@ -138,20 +144,25 @@ def _parse_obj(text: str) -> Tuple[List[Tri], bool]:
                 if len(tris) >= MAX_TRIANGLES:
                     return tris, True
                 tris.append((verts[idx[0]], verts[idx[k]], verts[idx[k + 1]]))
-    return tris, truncated
+    return tris, False
 
 
 def analyse(filename: str, data: bytes) -> MeshStats:
     name = filename.lower()
+    oversize_text = False
     try:
         if name.endswith(".stl"):
-            head = data[:256].lstrip()
-            if head[:5].lower() == b"solid" and b"facet" in data[:2048].lower():
-                return _stats_from_triangles(*_parse_ascii_stl(data.decode("utf-8", "ignore")))
-            return _stats_from_triangles(*_parse_binary_stl(data))
-        if name.endswith(".obj"):
-            return _stats_from_triangles(*_parse_obj(data.decode("utf-8", "ignore")))
-    except (ValueError, IndexError, struct.error, UnicodeError):
+            ascii_stl = data[:256].lstrip()[:5].lower() == b"solid" and b"facet" in data[:2048].lower()
+            if not ascii_stl:
+                return _stats_from_triangles(*_parse_binary_stl(data))
+            if len(data) <= MAX_TEXT_BYTES:
+                return _stats_from_triangles(*_parse_ascii_stl(data))
+            oversize_text = True
+        elif name.endswith(".obj"):
+            if len(data) <= MAX_TEXT_BYTES:
+                return _stats_from_triangles(*_parse_obj(data))
+            oversize_text = True
+    except (ValueError, IndexError, struct.error):
         pass
 
     # STEP / IGES / 3MF and anything unreadable: fall back to a size estimate so
@@ -163,5 +174,5 @@ def analyse(filename: str, data: bytes) -> MeshStats:
         bbox=(60.0, 60.0, 60.0),
         triangles=0,
         exact=False,
-        warnings=["estimated_from_file", "needs_engineer_review"],
+        warnings=["estimated_from_file", "needs_engineer_review"] + (["mesh_truncated"] if oversize_text else []),
     )

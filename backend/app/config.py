@@ -2,13 +2,8 @@ import secrets
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# Secrets that have shipped in this repo, docs or compose files. Never valid outside DEV.
-KNOWN_WEAK_SECRETS = {
-    "change-me-in-production-3dhub-iran",
-    "change-me-in-production",
-    "changeme",
-    "secret",
-}
+# The only default that ever shipped in this repo as a "working" secret.
+LEGACY_DEFAULT_SECRET = "change-me-in-production-3dhub-iran"
 
 
 class Settings(BaseSettings):
@@ -38,7 +33,10 @@ class Settings(BaseSettings):
 
 
 def _guard(s: Settings) -> Settings:
-    weak = (not s.jwt_secret) or len(s.jwt_secret) < 32 or s.jwt_secret in KNOWN_WEAK_SECRETS
+    secret = s.jwt_secret.strip()
+    # Length alone accepts "a" * 32: also demand variety, and reject the shipped default
+    # (with or without padding). Anything shorter than 32 is already rejected by the length rule.
+    weak = len(secret) < 32 or len(set(secret)) < 12 or secret == LEGACY_DEFAULT_SECRET
     if weak:
         if not s.dev:
             raise RuntimeError(

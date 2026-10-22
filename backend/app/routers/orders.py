@@ -45,7 +45,7 @@ def create_order(body: OrderIn, session: Session = Depends(get_session),
     session.add(quote)
     session.flush()
     total = quote.total_price
-    commission = int(total * settings.platform_commission / (1 + settings.platform_commission))
+    commission = claims["platform_fee"]  # exactly what the customer was shown, no recomputation drift
     order = Order(public_id=f"H3D-{secrets.token_hex(8).upper()}", user_id=user.id, quote_id=quote.id,
                   hub_id=hub.id if hub else None, address=body.address, note=body.note,
                   amount=total, commission=commission)
@@ -70,7 +70,7 @@ def _load(session: Session, order: Order) -> dict:
 
 
 @router.get("")
-def my_orders(limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0),
+def my_orders(limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0, le=1_000_000),
               session: Session = Depends(get_session), user: User = Depends(current_user)):
     # One JOIN instead of two extra queries per order (was N+1).
     rows = session.exec(
@@ -142,7 +142,7 @@ def add_review(body: ReviewIn, session: Session = Depends(get_session),
     if order.hub_id is None:
         raise HTTPException(400, "order_has_no_hub")
     review = Review(hub_id=order.hub_id, user_id=user.id, order_id=order.id,
-                    author=user.full_name or user.email.split("@")[0],  # never publish the full email
+                    author=user.full_name or "Customer",  # never derive a public name from the email
                     rating=body.rating, body=body.body)
     session.add(review)
     try:

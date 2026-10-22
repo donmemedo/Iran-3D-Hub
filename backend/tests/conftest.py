@@ -17,7 +17,7 @@ BACKEND = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if BACKEND not in sys.path:
     sys.path.insert(0, BACKEND)
 
-STRONG_SECRET = "pt-secret-local-only-" + "x" * 32
+STRONG_SECRET = "pt-secret-Zq7Lm2Xv9Rk4Tw8Yb3Nc6Hd1Fg5Js0PaEu"  # >= 32 chars and varied
 # A private temp dir: other processes cleaning /tmp must not be able to delete our databases.
 TMP = tempfile.mkdtemp(prefix="h3d-pytest-")
 _ENV_KEYS = ("JWT_SECRET", "DEV", "SEED_DEMO", "LOGIN_RATE_LIMIT", "MAX_UPLOAD_MB", "MAX_JSON_KB",
@@ -34,9 +34,9 @@ def fresh_app(**env):
     """Import app.main with the given env. Returns the module (so tests can reach app.*)."""
     for k in _ENV_KEYS:  # no leakage from the previous test
         os.environ.pop(k, None)
-    os.environ.update({"JWT_SECRET": STRONG_SECRET, "LOGIN_RATE_LIMIT": "1000", "DEV": "false"})
-    os.environ.update(env)
-    os.environ["DATABASE_URL"] = f"sqlite:///{TMP}/h3d-{uuid.uuid4().hex}.db"
+    os.environ.update({"JWT_SECRET": STRONG_SECRET, "LOGIN_RATE_LIMIT": "1000", "DEV": "false",
+                       "DATABASE_URL": f"sqlite:///{TMP}/h3d-{uuid.uuid4().hex}.db"})
+    os.environ.update(env)  # a test may override anything, including DATABASE_URL (restart simulation)
     # SQLModel keeps one global MetaData/registry; clear it so a re-import can redeclare tables.
     from sqlmodel import SQLModel
     SQLModel.metadata.clear()

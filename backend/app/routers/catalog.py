@@ -1,6 +1,4 @@
-import time
-
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from sqlmodel import Session, select
 
 from ..db import get_session
@@ -76,7 +74,7 @@ def hubs(city: str | None = Query(None, max_length=40), technology: str | None =
 
 
 @router.get("/hubs/{hub_id}")
-def hub_detail(hub_id: int, session: Session = Depends(get_session)):
+def hub_detail(hub_id: int = Path(ge=1, le=2**31 - 1), session: Session = Depends(get_session)):
     hub = session.get(Hub, hub_id)
     if not hub:
         raise HTTPException(404, "hub_not_found")
@@ -85,18 +83,11 @@ def hub_detail(hub_id: int, session: Session = Depends(get_session)):
     return {"hub": hub, "reviews": [r.model_dump(exclude={"user_id", "order_id"}) for r in reviews]}
 
 
-_stats_cache: tuple[float, dict] | None = None  # (expires_at, payload); one worker, 30 s TTL
-
-
 @router.get("/stats")
 def stats(session: Session = Depends(get_session)):
-    global _stats_cache
-    now = time.monotonic()
-    if _stats_cache and _stats_cache[0] > now:
-        return _stats_cache[1]
     hubs_all = session.exec(select(Hub)).all()
     n = max(len(hubs_all), 1)
-    payload = {
+    return {
         "hubs": len(hubs_all),
         "cities": len({h.city_en for h in hubs_all}),
         "orders_done": sum(h.orders_done for h in hubs_all),
@@ -105,5 +96,3 @@ def stats(session: Session = Depends(get_session)):
         "materials": len(session.exec(select(Material)).all()),
         "free_capacity_pct": round(sum(100 - h.capacity_pct for h in hubs_all) / n),
     }
-    _stats_cache = (now + 30, payload)
-    return payload

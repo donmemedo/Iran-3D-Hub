@@ -28,7 +28,8 @@ def _rows(model):
 # ───────────────────────── auth & session ─────────────────────────
 
 def test_default_or_weak_jwt_secret_refuses_to_start():
-    for bad in ("change-me-in-production-3dhub-iran", "change-me-in-production", "short", ""):
+    for bad in ("change-me-in-production-3dhub-iran", "change-me-in-production-3dhub-iran ", "change-me-in-production",
+                "short", "", "a" * 40, " " * 40, "abababababababababababababababab"):
         with pytest.raises(RuntimeError):
             fresh_app(JWT_SECRET=bad, DEV="false")
 
@@ -212,9 +213,51 @@ def test_persisted_quote_is_owner_only(c):
     assert c.get(f"/api/quotes/{pid}", headers=h).status_code == 200
 
 
-def test_hub_detail_404_and_cancel_rules(c):
+def test_hub_detail_404(c):
     assert c.get("/api/hubs/9999").status_code == 404
     assert c.get("/api/hubs/1").status_code == 200
+
+
+def test_cancel_rules_and_no_revival(c):
+    h, u = register(c)
+    tok = manual_quote(c, h).json()["quote"]["public_id"]
+    oid = place_order(c, h, tok).json()["public_id"]
+    r = c.post(f"/api/orders/{oid}/cancel", headers=h)
+    assert r.status_code == 200 and r.json()["order"]["status"] == "canceled"
+    assert c.post(f"/api/orders/{oid}/cancel", headers=h).status_code == 200      # idempotent
+    set_role(u["email"], "admin")
+    ha = login(c, u["email"], "Passw0rd!x")
+    assert c.post(f"/api/orders/{oid}/advance", headers=ha).json()["order"]["status"] == "canceled"  # not revived
+    oid2 = place_order(c, h, tok).json()["public_id"]
+    for _ in range(4):
+        c.post(f"/api/orders/{oid2}/advance", headers=ha)
+    r = c.post(f"/api/orders/{oid2}/cancel", headers=h)
+    assert r.status_code == 400 and r.json()["detail"] == "too_late_to_cancel"
+
+
+def test_status_transition_is_compare_and_set(c):
+    from sqlmodel import Session, select
+    from app.db import engine
+    from app.models import Order
+    from app.routers import orders as orders_router
+    h, _ = register(c)
+    tok = manual_quote(c, h).json()["quote"]["public_id"]
+    oid = place_order(c, h, tok).json()["public_id"]
+    with Session(engine) as s:
+        stale = s.exec(select(Order).where(Order.public_id == oid)).one()     # loaded as pending_payment
+        with Session(engine) as s2:                                           # someone else moves it first
+            other = s2.exec(select(Order).where(Order.public_id == oid)).one()
+            orders_router._transition(s2, other, "in_production")
+        with pytest.raises(Exception) as e:
+            orders_router._transition(s, stale, "canceled")                   # must NOT overwrite
+        assert getattr(e.value, "status_code", None) == 409
+
+
+def test_order_commission_is_the_fee_the_customer_was_shown(c):
+    h, _ = register(c)
+    res = manual_quote(c, h, quantity=7).json()
+    o = place_order(c, h, res["quote"]["public_id"]).json()
+    assert o["commission"] == res["pricing"]["platform_fee"] and o["amount"] == res["pricing"]["total_price"]
 
 
 # ───────────────────────── input validation ─────────────────────────
@@ -280,6 +323,104 @@ def test_material_and_technology_filters_match_whole_tokens(c):
 
 
 # ───────────────────────── upload & geometry DoS ─────────────────────────
+
+def test_integers_beyond_sqlite_range_are_422_not_500(c):
+    h, _ = register(c)
+    assert c.get("/api/hubs/99999999999999999999999999").status_code == 422
+    assert c.get("/api/orders?offset=99999999999999999999", headers=h).status_code == 422
+    tok = manual_quote(c, h).json()["quote"]["public_id"]
+    assert place_order(c, h, tok, hub_id=10**30).status_code == 422
+
+
+def test_access_log_cannot_be_forged_through_the_path(c, caplog):
+    import logging
+    with caplog.at_level(logging.INFO, logger="app.access"):
+        c.get("/api/nope%0aINFO%20app.audit%20order_created%20order=H3D-FORGED")
+    msgs = [r.getMessage() for r in caplog.records if r.name == "app.access"]
+    assert msgs and all("\n" not in m and "\r" not in m for m in msgs)
+
+
+def test_reviewer_name_never_comes_from_the_email(c):
+    h, u = register(c, email="jane.doe.1985@example.com")   # no full_name stored
+    from sqlmodel import Session, select
+    from app.db import engine
+    from app.models import User
+    with Session(engine) as s:
+        usr = s.exec(select(User).where(User.email == u["email"])).one()
+        usr.full_name = ""
+        s.add(usr)
+        s.commit()
+    tok = manual_quote(c, h).json()["quote"]["public_id"]
+    oid = place_order(c, h, tok, hub_id=1).json()["public_id"]
+    set_role(u["email"], "admin")
+    ha = login(c, u["email"], "Passw0rd!x")
+    for _ in range(4):
+        c.post(f"/api/orders/{oid}/advance", headers=ha)
+    r = c.post("/api/orders/reviews", json={"order_public_id": oid, "rating": 4}, headers=h)
+    assert r.status_code == 200 and "jane" not in r.json()["author"].lower()
+    assert "jane" not in c.get("/api/hubs/1").text.lower()
+
+
+def test_rate_limiter_memory_is_hard_capped_and_fast(monkeypatch):
+    import time
+    fresh_app()
+    from app import ratelimit
+    monkeypatch.setattr(ratelimit, "_MAX_KEYS", 1000)
+    for i in range(5000):
+        assert ratelimit.hit(f"k{i}", 5, 60)
+    assert len(ratelimit._buckets) <= 1000
+    t0 = time.perf_counter()
+    for i in range(2000):
+        ratelimit.hit(f"x{i}", 5, 60)
+    assert (time.perf_counter() - t0) / 2000 < 0.001   # no table scans: well under 1 ms per hit
+
+
+def test_hash_queue_sheds_load_instead_of_starving_the_pool(monkeypatch):
+    cl = client()
+    try:
+        from app import security
+        monkeypatch.setattr(security, "_HASH_WAIT_S", 0.05)
+        held = [security._hash_slots.acquire() for _ in range(4)]       # every hash slot is busy
+        try:
+            r = cl.post("/api/auth/login", json={"email": "nobody@example.com", "password": "pw-1234567"})
+            assert r.status_code == 503 and r.headers.get("retry-after")
+        finally:
+            for _ in held:
+                security._hash_slots.release()
+        assert cl.post("/api/auth/login", json={"email": "nobody@example.com", "password": "pw-1234567"}).status_code == 401
+    finally:
+        cl.__exit__(None, None, None)
+
+
+def test_demo_account_exists_only_in_demo_mode_and_is_locked_afterwards():
+    import os, tempfile
+    db = f"sqlite:///{os.path.join(tempfile.gettempdir(), 'h3d-demo-lock-' + uuid.uuid4().hex + '.db')}"
+    cl = client(SEED_DEMO="true", DATABASE_URL=db)
+    try:
+        assert cl.post("/api/auth/login", json={"email": "demo@3dhub.ir", "password": "demo1234"}).status_code == 200
+    finally:
+        cl.__exit__(None, None, None)
+    cl = client(DATABASE_URL=db)             # same database, restarted WITHOUT demo mode
+    try:
+        assert cl.post("/api/auth/login", json={"email": "demo@3dhub.ir", "password": "demo1234"}).status_code == 401
+    finally:
+        cl.__exit__(None, None, None)
+        for f in os.listdir(tempfile.gettempdir()):
+            if f.startswith("h3d-demo-lock-"):
+                os.remove(os.path.join(tempfile.gettempdir(), f))
+
+
+def test_text_meshes_over_the_byte_budget_are_not_parsed(monkeypatch):
+    fresh_app()
+    from app import geometry
+    monkeypatch.setattr(geometry, "MAX_TEXT_BYTES", 1000)
+    s = geometry.analyse("big.obj", b"v 0 0 0\n" * 500)                 # 4000 bytes > 1000
+    assert {"estimated_from_file", "mesh_truncated", "needs_engineer_review"} <= set(s.warnings)
+    monkeypatch.setattr(geometry, "MAX_TEXT_BYTES", 10**9)
+    monkeypatch.setattr(geometry, "MAX_LINES", 50)
+    s = geometry.analyse("lines.obj", b"\n" * 5000 + b"v 0 0 0\n")         # blank-line flood is budgeted too
+    assert "mesh_truncated" in s.warnings
+
 
 def test_analyze_is_not_an_async_def_blocking_the_loop():
     fresh_app()

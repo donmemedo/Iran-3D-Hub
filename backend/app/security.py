@@ -21,12 +21,17 @@ _N, _R, _P = 2**15, 8, 1
 # Hashing is the most expensive thing the API does. Cap concurrent hashes so a login
 # burst cannot allocate 40 threads x 32 MiB; waiters queue instead of exhausting RAM.
 _hash_slots = threading.BoundedSemaphore(4)
+_HASH_WAIT_S = 2.0   # a queued login holds a pool thread: wait briefly, then shed load (503)
 
 
 def _scrypt(password: str, salt: bytes, n: int, r: int, p: int) -> bytes:
-    with _hash_slots:
+    if not _hash_slots.acquire(timeout=_HASH_WAIT_S):
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "busy", headers={"Retry-After": "2"})
+    try:
         return hashlib.scrypt(password.encode(), salt=salt, n=n, r=r, p=p,
                               maxmem=128 * 1024 * 1024, dklen=32)
+    finally:
+        _hash_slots.release()
 
 
 def hash_password(password: str) -> str:
@@ -126,18 +131,6 @@ def current_user(
     if not user:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid_token")
     return user
-
-
-def optional_user(
-    creds: Optional[HTTPAuthorizationCredentials] = Depends(bearer),
-    session: Session = Depends(get_session),
-) -> Optional[User]:
-    if creds is None:
-        return None
-    try:
-        return current_user(creds, session)
-    except HTTPException:
-        return None
 
 
 def require_admin(user: User = Depends(current_user)) -> User:
