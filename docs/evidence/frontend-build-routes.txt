@@ -1,0 +1,17 @@
+Route (app)                                 Size  First Load JS
+┌ ○ /                                    5.83 kB         167 kB
+├ ○ /_not-found                            990 B         104 kB
+├ ○ /dashboard                            5.2 kB         162 kB
+├ ○ /hubs                                5.21 kB         162 kB
+├ ○ /login                               4.66 kB         161 kB
+├ ○ /privacy                             2.43 kB         118 kB
+├ ○ /quote                               6.54 kB         167 kB
+└ ○ /terms                               2.11 kB         118 kB
++ First Load JS shared by all             103 kB
+  ├ chunks/255-ce8c7c75002f810b.js       46.5 kB
+  ├ chunks/4bd1b696-c023c6e3521b1417.js  54.2 kB
+  └ other shared chunks (total)          2.06 kB
+
+
+○  (Static)  prerendered as static content
+

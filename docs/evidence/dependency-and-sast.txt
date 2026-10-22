@@ -1,0 +1,8 @@
+OSV.dev query of every installed backend package (2026-10-16):
+  packages with advisories: 1  -> pip 24.0 (build tooling; removed from the runtime image)
+  fastapi 0.142.4, starlette 1.8.0, python-multipart 0.0.32, PyJWT 2.15.1, uvicorn 0.54.0, sqlmodel 0.0.48: none
+
+Before: python-multipart 0.0.20, starlette 0.41.3, PyJWT 2.10.1 had advisories; next 15.5.4 had 31 (3 critical).
+After:  next 15.5.27 / react 19.1.9 (0 advisories per OSV at upgrade time).
+
+bandit -r backend/app -ll: no medium or high findings

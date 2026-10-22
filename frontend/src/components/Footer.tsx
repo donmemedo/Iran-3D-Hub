@@ -26,14 +26,13 @@ export function Footer() {
           <ul className="muted space-y-2 text-[13.5px]">
             <li><Link href="/#how" className="hover:text-[var(--fg)]">{t.footer.about}</Link></li>
             <li><Link href="/#faq" className="hover:text-[var(--fg)]">{t.footer.contact}</Link></li>
-            <li><Link href="/hubs" className="hover:text-[var(--fg)]">{t.footer.careers}</Link></li>
           </ul>
         </div>
         <div>
           <div className="mb-3 text-[13px] font-bold">{t.footer.legal}</div>
           <ul className="muted space-y-2 text-[13.5px]">
-            <li><span>{t.footer.privacy}</span></li>
-            <li><span>{t.footer.terms}</span></li>
+            <li><Link href="/privacy" className="hover:text-[var(--fg)]">{t.footer.privacy}</Link></li>
+            <li><Link href="/terms" className="hover:text-[var(--fg)]">{t.footer.terms}</Link></li>
           </ul>
         </div>
       </div>

@@ -1,0 +1,27 @@
+# gitleaks config: the default ruleset plus one repo-specific rule and narrow allowlists.
+# Scan the working tree:  gitleaks dir .      Full history:  gitleaks git .
+title = "3D Hub Iran gitleaks config"
+
+[extend]
+useDefault = true
+
+# A committed JWT_SECRET value is the one secret this app cannot recover from: anyone who
+# has it can mint admin tokens and price quotes. Empty values and ${VAR} references do not match.
+[[rules]]
+id = "h3d-jwt-secret-assignment"
+description = "JWT_SECRET assigned a literal value"
+regex = '''(?i)\bJWT_SECRET["']?\s*[:=]\s*["']?[A-Za-z0-9][A-Za-z0-9_\-+/=]{31,}'''
+keywords = ["jwt_secret"]
+tags = ["jwt", "h3d"]
+
+[allowlist]
+description = "Templates, docs examples, and known-fake values"
+paths = [
+  '''(^|/)\.gitleaks\.toml$''',
+  '''(^|/)[^/]*\.example$''',     # .env.example and friends: placeholders only
+  '''^docs/.*''',               # documentation examples
+]
+regexes = [
+  '''demo1234''',                      # public demo password (SEED_DEMO only)
+  '''pt-secret-[A-Za-z0-9-]+''',       # fixed fake secret used only by backend/tests/conftest.py
+]

@@ -1,0 +1,6 @@
+Final run on branch audit/security-perf-ux (after the re-verification fixes)
+command: cd backend && python -m pytest -v -p no:cacheprovider
+============================= 60 passed in 15.51s ==============================
+
+bandit -r backend/app -ll:
+exit 0

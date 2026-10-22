@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useApp } from "@/components/Providers";
-import { Hero3D } from "@/components/Hero3D";
 import { Reveal } from "@/components/Reveal";
 import { Counter, Pill, TiltCard } from "@/components/Bits";
 import { api } from "@/lib/api";
@@ -12,6 +12,12 @@ import { money, num } from "@/lib/format";
 
 type Stats = { hubs: number; cities: number; orders_done: number; avg_rating: number; avg_lead_days: number; materials: number; free_capacity_pct: number };
 type Material = { slug: string; name_fa: string; name_en: string; technology: string; price_per_cm3: number; color_hex: string; desc_fa: string; desc_en: string };
+
+// three.js stays out of the initial bundle; the hero paints first and the scene streams in.
+const Hero3D = dynamic(() => import("@/components/Hero3D").then((m) => m.Hero3D), {
+  ssr: false,
+  loading: () => <div className="absolute inset-0" aria-hidden />,
+});
 
 const CITIES_FA = ["تهران", "کرج", "اصفهان", "مشهد", "شیراز", "تبریز", "قم", "اهواز", "رشت", "یزد", "کرمان", "ارومیه"];
 const CITIES_EN = ["Tehran", "Karaj", "Isfahan", "Mashhad", "Shiraz", "Tabriz", "Qom", "Ahvaz", "Rasht", "Yazd", "Kerman", "Urmia"];
@@ -106,12 +112,14 @@ export default function Home() {
       </section>
 
       {/* ───────── City marquee ───────── */}
-      <section className="hairline overflow-hidden border-y py-4">
+      <section aria-label={t.a11y.marquee} className="hairline overflow-hidden border-y py-4">
         <div className="marquee gap-10 whitespace-nowrap px-5">
           {[...cities, ...cities].map((c, i) => (
-            <span key={i} className="muted flex items-center gap-10 text-[13px] font-semibold tracking-wide">
+            // the second copy only exists to make the loop seamless, so screen readers skip it
+            <span key={i} aria-hidden={i >= cities.length ? true : undefined}
+              className="muted flex items-center gap-10 text-[13px] font-semibold tracking-wide">
               {c}
-              <span className="h-1 w-1 rounded-full bg-[#00e5c0]" />
+              <span className="h-1 w-1 rounded-full bg-[#00e5c0]" aria-hidden />
             </span>
           ))}
         </div>
@@ -258,18 +266,21 @@ export default function Home() {
           {faqs.map((f, i) => (
             <Reveal key={i} delay={i * 0.05}>
               <div className="glass overflow-hidden rounded-2xl">
-                <button onClick={() => setFaq(faq === i ? null : i)}
-                  className="flex w-full items-center justify-between gap-4 px-5 py-4 text-start text-[14.5px] font-bold">
-                  {f.q}
-                  <motion.span animate={{ rotate: faq === i ? 45 : 0 }}
-                    transition={{ type: "spring", bounce: 0, duration: 0.3 }}
-                    className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-[rgb(var(--line)/0.09)] text-lg leading-none">
-                    +
-                  </motion.span>
-                </button>
+                <h3>
+                  <button type="button" id={`faq-q-${i}`} aria-expanded={faq === i} aria-controls={`faq-a-${i}`}
+                    onClick={() => setFaq(faq === i ? null : i)}
+                    className="flex w-full items-center justify-between gap-4 px-5 py-4 text-start text-[14.5px] font-bold">
+                    {f.q}
+                    <motion.span aria-hidden animate={{ rotate: faq === i ? 45 : 0 }}
+                      transition={{ type: "spring", bounce: 0, duration: 0.3 }}
+                      className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-[rgb(var(--line)/0.09)] text-lg leading-none">
+                      +
+                    </motion.span>
+                  </button>
+                </h3>
                 <AnimatePresence initial={false}>
                   {faq === i && (
-                    <motion.div
+                    <motion.div id={`faq-a-${i}`} role="region" aria-labelledby={`faq-q-${i}`}
                       initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }}
                       exit={{ height: 0, opacity: 0 }}
                       transition={{ type: "spring", bounce: 0, duration: 0.38 }}>
@@ -317,7 +328,7 @@ function MiniStat({ value, label }: { value: React.ReactNode; label: string }) {
 }
 
 function StepIcon({ i }: { i: number }) {
-  const common = { className: "h-[18px] w-[18px]", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
+  const common = { className: "h-[18px] w-[18px]", "aria-hidden": true, fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
   if (i === 0) return <svg viewBox="0 0 24 24" {...common}><path d="M12 16V4m0 0L8 8m4-4l4 4" /><path d="M4 16v3a1 1 0 001 1h14a1 1 0 001-1v-3" /></svg>;
   if (i === 1) return <svg viewBox="0 0 24 24" {...common}><path d="M12 2l9 5v10l-9 5-9-5V7z" /><path d="M3 7l9 5 9-5M12 12v10" /></svg>;
   if (i === 2) return <svg viewBox="0 0 24 24" {...common}><circle cx="12" cy="10" r="3" /><path d="M12 21s7-6.2 7-11a7 7 0 10-14 0c0 4.8 7 11 7 11z" /></svg>;

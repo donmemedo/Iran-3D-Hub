@@ -27,6 +27,9 @@ CITY_LEAD = {
 QTY_BREAKS = [(1, 1.0), (5, 0.93), (10, 0.86), (25, 0.78), (50, 0.70)]
 
 
+MAX_VOLUME_CM3 = 100_000  # 100 L: above this the model is not a printable part (and avoids int overflow)
+
+
 def qty_factor(quantity: int) -> float:
     factor = 1.0
     for threshold, value in QTY_BREAKS:
@@ -81,6 +84,7 @@ def check_warnings(bbox: List[float], material: Material, max_build_mm: int = 25
     out: List[str] = []
     if bbox and max(bbox) > max_build_mm:
         out.append("oversize_split_required")
-    if bbox and min(b for b in bbox if b > 0) < material.min_wall_mm:
+    smallest = min((b for b in bbox if b > 0), default=None)  # all-zero bbox must not crash
+    if smallest is not None and smallest < material.min_wall_mm:
         out.append("thin_wall")
     return out

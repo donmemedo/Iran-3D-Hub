@@ -1,0 +1,142 @@
+[
+ {
+  "check": "security headers present",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "no server banner",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "/docs and /openapi.json hidden",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "validation errors do not echo input",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "CORS preflight denied for https://evil.example",
+  "pass": true,
+  "detail": "status 400"
+ },
+ {
+  "check": "CORS preflight denied for http://localhost:1337",
+  "pass": true,
+  "detail": "status 400"
+ },
+ {
+  "check": "CORS allows configured origin, no credentials flag",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "catalog GET is cacheable, auth is no-store",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "orders require auth",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "token signed with the old public default secret is rejected",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "alg=none token rejected",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "register ok",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "empty / short password rejected",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "30 mm cube measures 27.0 cm3 exactly",
+  "pass": true,
+  "detail": "total 231000"
+ },
+ {
+  "check": "quote returns signed token and stores nothing",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "tampered price rejected at order time",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "legit order created at signed price",
+  "pass": true,
+  "detail": "H3D-C0B9FCE98892A639"
+ },
+ {
+  "check": "customer cannot advance own order to delivered",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "another user cannot read or cancel the order",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "review before delivery refused",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "negative quantity refused",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "oversized JSON body -> 413 before parsing",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "unsupported extension refused",
+  "pass": true,
+  "detail": ""
+ },
+ {
+  "check": "heavy 90k-triangle upload parsed",
+  "pass": true,
+  "detail": "8.5 MB in 21.00s"
+ },
+ {
+  "check": "API stays responsive during the parse",
+  "pass": true,
+  "detail": "health p50 51 ms, max 1022 ms over 214 pings"
+ },
+ {
+  "check": "login timing: known vs unknown email within 2x",
+  "pass": false,
+  "detail": "known 1535 ms, unknown 16 ms"
+ },
+ {
+  "check": "brute force throttled with 429 + Retry-After",
+  "pass": true,
+  "detail": "[401, 401, 401, 401, 401, 401, 401, 401, 429, 429, 429, 429]"
+ },
+ {
+  "check": "Retry-After header sent",
+  "pass": true,
+  "detail": ""
+ }
+]

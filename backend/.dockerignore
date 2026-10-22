@@ -1,4 +1,33 @@
+# Keep secrets, local state and dev-only files out of the build context.
+# Patterns are relative to the context root: use **/ for nested matches.
+.git
+.github
+.gitignore
+.idea
+.vscode
+
+**/.env
+**/.env.*
 .venv
-__pycache__
+venv
+**/__pycache__
+**/*.py[cod]
+.pytest_cache
+.coverage
+htmlcov
+
+# Local databases (SQLite + WAL side files)
 data
-*.db
+**/*.db
+**/*.db-wal
+**/*.db-shm
+**/*.sqlite*
+
+# Not needed in the image
+tests
+pytest.ini
+requirements-dev.txt
+Dockerfile
+.dockerignore
+**/*.md
+docs
